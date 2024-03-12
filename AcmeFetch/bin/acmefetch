@@ -1,0 +1,449 @@
+#!/usr/bin/env perl
+use warnings;
+use strict;
+use lib qw(); # PERL5LIB
+use FindBin;
+use lib "$FindBin::RealBin/../lib";use lib "$FindBin::RealBin/../thirdparty/lib/perl5"; # LIBDIR
+
+use Protocol::ACME;
+use Data::Processor;
+use Data::Processor::ValidatorFactory;
+use JSON;
+use Getopt::Long 2.25 qw(:config posix_default no_ignore_case);
+use Pod::Usage 1.14;
+use File::Temp;
+use Data::Dumper;
+use Crypt::OpenSSL::X509;
+use FindBin;
+
+my $VERSION = '0.dev'; # VERSION
+
+my %formatMap = (
+    DER => Crypt::OpenSSL::X509::FORMAT_ASN1(),
+    PEM => Crypt::OpenSSL::X509::FORMAT_PEM(),
+);
+
+
+# parse options
+my %opt = ();
+sub main()
+{
+
+    GetOptions(\%opt, 'help|h', 'man', 'version','force','debug',
+               'cfg=s', 'staging','verbose','checkonly') or exit(1);
+    if($opt{help})     { pod2usage(1) }
+    if($opt{man})      { pod2usage(-exitstatus => 0, -verbose => 2) }
+    if($opt{version})  { print "acmefetch $VERSION\n"; exit(0) }
+
+    my $cfg = loadCfg($opt{cfg} // $FindBin::RealBin.'/../etc/acmefetch.cfg');
+
+    $cfg->{GENERAL}{host} = $opt{staging} ? $cfg->{GENERAL}->{ACMEstaging}
+                                            : $cfg->{GENERAL}->{ACMEservice};
+    getCertificates($cfg);
+}
+
+main;
+
+sub bla {
+    my $level = shift;
+    my $text = shift;
+    if ($opt{verbose}
+        or ($opt{checkonly} and $level eq 'info')){
+         print "* $text\n";
+    }
+}
+
+# get a validator for our configuration file
+
+sub getDataProcessor {
+    my $vf = Data::Processor::ValidatorFactory->new;
+    my $string = $vf->rx('^.*$','expected a string');
+    my $integer = $vf->rx('^\d+$','expected an integer');
+    my $schema = {
+        GENERAL => {
+            description => 'general settings',
+            members => {
+                opensslBin => {
+                    description => 'our openssl binary',
+                    optional => 1,
+                    default => 'openssl',
+                    validator => sub {
+                        my $bin = shift;
+                        `$bin version 2>&1` =~ /^OpenSSL 1.0/ or return "Openssl $bin not found";
+                        return "";
+                    }
+                },
+                ACMEstaging => {
+                    description => 'host name of the ACME staging server to use',
+                    validator => $string,
+                    default => 'acme-staging.api.letsencrypt.org',
+                    optional => 1,
+                },
+                ACMEservice => {
+                    description => 'host name of the ACME server to use',
+                    default => 'acme-v01.api.letsencrypt.org',
+                    validator => $string,
+                    optional => 1,
+                },
+                accountKeyPath => {
+                    description => 'your ACME account key (will get created when missing)',
+                    validator => $vf->file('>>','account key path'),
+                }
+            },
+        },
+        CERTS => {
+            description => 'a list of certificates to keep up todate',
+            array => 1,
+            members => {
+                certOutput => {
+                    description => 'cert output file',
+                    validator => $vf->file('>>','cert file'),
+                },
+                certFormat => {
+                    description => 'PEM or DER output format for the cert',
+                    validator => $vf->rx('^(DER|PEM)','Pick DER or PEM'),
+                    default => 'PEM',
+                },
+                keyOutput => {
+                    description => 'key output file',
+                    validator => $vf->file('>>','key file')
+                },
+                keyFormat => {
+                    description => 'PEM or DER output format for the key',
+                    validator => $vf->rx('^(DER|PEM)','Pick DER or PEM'),
+                    default => 'PEM',
+                },
+                chainOutput => {
+                    description => 'chain output file',
+                    validator => $vf->file('>>','chain file'),
+                },
+                chainFormat => {
+                    description => 'PEM or DER output format for the chain file',
+                    validator => $vf->rx('^(DER|PEM)','Pick DER or PEM'),
+                    default => 'PEM',
+                },
+                commonName => {
+                    description => 'designate the common name in the certificate. the other sites will be listed as subjectAltName entries.',
+                    validator => $string,
+                },
+                SITES => {
+                    description => "Which websites to include in the certificate",
+                    members => {
+                        '\S+' => {
+                            regex => 1,
+                            members => {
+                                challengeHandler => {
+                                    description => 'challenge handler module',
+                                    validator => sub {
+                                        my $module = shift;
+                                        eval {
+                                            require 'Protocol/ACME/Challenge/'.$module.'.pm';
+                                        };
+                                        if ($@) {
+                                            return $@;
+                                        }
+                                        return '';
+                                    },
+                                },
+                                challengeConfig => {
+                                    description => 'config hash to pass on th the challenge handler',
+                                    validator => sub {
+                                        my $cfg = shift;
+                                        my $section = shift;
+                                        if (ref $cfg ne 'HASH'){
+                                            return "expected a HASH";
+                                        }
+                                        return '';
+                                    }
+                                }
+                            },
+                        }
+                    }
+                }
+            }
+        }
+    };
+    return Data::Processor->new($schema);
+};
+
+# load a json config file. Allowing # comments
+
+sub loadJSONCfg {
+    my $file = shift;
+    open my $fh, '<', $file or die "Opening $file: $!";
+    my $json = join '', <$fh>;
+    my $j = JSON->new;
+    $j->relaxed(1);
+    my $raw_cfg = eval { $j->decode($json) };
+    if ($@){
+        if ($@ =~ /(.+?) at line (\d+), offset (\d+)/){
+            my $warning = $1;
+            my $line = $2;
+            my $offset = $3;
+            open my $json, '<', $file;
+            my $c =0;
+            warn "Reading ".$file."\n";
+            warn "$warning\n\n";
+            while (<$json>){
+                chomp;
+                $c++;
+                if ($c == $line){
+                    warn ">-".('-' x $offset).'.'."  line $line\n";
+                    warn "  $_\n";
+                    warn ">-".('-' x $offset).'^'."\n";
+                }
+                elsif ($c+3 > $line and $c-3 < $line){
+                    warn "  $_\n";
+                }
+            }
+            warn "\n";
+            exit 1;
+        }
+        else {
+            die $@;
+        }
+    }
+    return $raw_cfg;
+}
+
+sub convertCert {
+    my $cert = shift;
+    my $inForm = shift;
+    my $outForm = shift;
+    return (Crypt::OpenSSL::X509->new_from_string($cert,$formatMap{$inForm})->as_string($formatMap{$outForm}));
+}
+
+sub loadCfg {
+    my $file = shift;
+    my $cfg = loadJSONCfg($file);
+    my $err = getDataProcessor()->validate($cfg);
+    my $hasErrors;
+    for my $cert (@{$cfg->{CERTS}}){
+        if (not exists $cert->{SITES}{$cert->{commonName}} ){
+            die "commonName ($cert->{commonName}) has no matching site entry.\n"
+        }
+
+        for my $site (sort keys %{$cert->{SITES}}){
+            my $sp = $cert->{SITES}{$site};
+            $sp->{challengeObj} = eval {
+                "Protocol::ACME::Challenge::$sp->{challengeHandler}"->new($sp->{challengeConfig});
+            };
+            if ($@){
+                die "Failed to instanciate Challenge handler for $site - $sp->{challengeHandler} ($@)\n";
+            }
+        }
+    }
+    for ($err->as_array){
+        warn "Config ERROR: $_\n";
+        $hasErrors = 1;
+    }
+    die "Can't continue with config errors\n" if $hasErrors;
+    return $cfg;
+}
+
+sub makeCsr {
+    my $cfg = shift;
+    my $cert = shift;
+    my $openssl = $cfg->{GENERAL}{opensslBin};
+    $cert->{altNames} = join ',', map {"DNS:$_"} sort keys %{$cert->{SITES}};
+    my $cfgFh = File::Temp->new(UNLINK => 0,SUFFIX => '.cfg');
+
+    my $csr = <<'CSRcfg_END';
+[ req ]
+default_bits              = 2048
+distinguished_name        = req_distinguished_name
+req_extensions            = req_ext
+
+[ req_distinguished_name ]
+commonName                = fqn Hostname
+commonName_default        = $C{commonName}
+commonName_max            = 64
+
+[ req_ext ]
+subjectAltName            = @alt_names
+
+[SAN]
+subjectAltName            = $C{altNames}
+CSRcfg_END
+    $csr =~ s/\$C\{(.+?)}/$cert->{$1}/g;
+    print $cfgFh $csr;
+    $cfgFh->flush();
+    print "$cfgFh";
+    my $csrFh = File::Temp->new( UNLINK => 0,SUFFIX => '.csr');
+    system $openssl,qw(req -nodes -newkey rsa:2048 -batch -reqexts SAN -outform der),
+        -keyout => $cert->{keyOutput}.'.'.$$,
+        -keyform => $cert->{keyFormat},
+        -out  => $csrFh->filename(),
+        -config => $cfgFh->filename();
+    chmod 0600, $cert->{keyOutput}.'.'.$$;
+    unlink $cfgFh->filename();
+    return $csrFh->filename();
+}
+
+sub getAccountKey {
+    my $cfg = shift;
+    my $openssl = $cfg->{GENERAL}{opensslBin};
+    my $key = $cfg->{GENERAL}{accountKeyPath};
+    if (not -e $key or -z $key){
+        system $openssl, 'genrsa', -out => $key, 2048;
+    }
+    return $key;
+}
+
+sub getCertificates {
+    my $cfg = shift;
+    my $openssl = $cfg->{GENERAL}{opensslBin};
+    for my $cert (@{$cfg->{CERTS}}){
+        bla 'debug',"## $cert->{commonName} ##";
+        next if checkCert($cert->{certOutput},$cert->{certFormat},$cert->{SITES}) and not $opt{force};
+        next if $opt{checkonly};
+        my $acme = Protocol::ACME->new(
+            host => $cfg->{GENERAL}{host},
+            account_key => {
+                filename => getAccountKey($cfg),
+                format => 'PEM',
+            },
+            openssl => $cfg->{GENERAL}{opensslBin},
+            loglevel => ($opt{debug} ? 'debug': 'error'),
+            debug => $opt{debug},
+        );
+        bla 'debug',"talk to $cfg->{GENERAL}{host}";
+        $acme->directory();
+        $acme->register();
+        $acme->accept_tos();
+        for my $domain (sort keys %{$cert->{SITES}}){
+            bla 'debug',"authorize $domain via $cert->{SITES}{$domain}{challengeConfig}{www_root}";
+            $acme->authz( $domain );
+            $acme->handle_challenge( $cert->{SITES}{$domain}{challengeObj} );
+            $acme->check_challenge();
+        }
+        my $csrFile = makeCsr($cfg,$cert);
+        eval {
+            my $certData = convertCert($acme->sign( $csrFile ),'DER',$cert->{certFormat});
+            my $certFile = $cert->{certOutput};
+            my $fh = IO::File->new( $certFile, "w" )
+                || die "Write $certFile: $!";
+            print $fh $certData;
+            $fh->close();
+            my $chainData = convertCert($acme->chain(),'DER',$cert->{chainFormat});
+            my $fh2 = IO::File->new( $cert->{chainOutput}, "w" )
+                || die "Write $cert->{chainOutput}: $!";
+            print $fh2 $chainData;
+            $fh2->close();
+            rename $cert->{keyOutput}.'.'.$$, $cert->{keyOutput};
+        };
+        if ($@){
+            unlink $cert->{keyOutput}.'.'.$$;
+            warn "PROBLEM: $@\n";
+        }
+    }
+}
+
+# check if a certificat covers the indicated domains and will NOT expire within the next 30 days
+
+sub checkCert {
+    my $file = shift;
+    my $format = shift;
+
+    my $domains = shift;
+    if (not -r $file or -z $file){
+        bla 'info',"Cert $file is missing. Generating.\n";
+        return 0;
+    };
+    my $x509 = Crypt::OpenSSL::X509->new_from_file($file,$formatMap{$format});
+    my %dns;
+    $x509->subject() =~ m{CN=([^,/\s]+)} and $dns{$1} = 1;
+    map { /DNS:([^\s]+)/ and $dns{$1} =1 } split /\s*,\s*/, $x509->extensions_by_oid->{"2.5.29.17"}->to_string;
+    for my $domain (keys %$domains){
+        if (not $dns{$domain}){
+            bla 'info',"Cert $file missing domain $domain. Renewing.\n";
+            return 0;
+        };
+    }
+    if ($x509->checkend(30*24*3600)){
+        bla 'info',"Cert expires within 30 days. Renewing.\n";
+        return 0;
+    }
+    bla 'debug',"Cert still ok. Skipping. (use --force to override)\n";
+    return 1;
+}
+
+__END__
+
+=head1 NAME
+
+acmefetch - generate ACME based certificates
+
+=head1 SYNOPSIS
+
+B<acmefetch> [I<options>...]
+
+     --man           show man-page and exit
+ -h, --help          display this help and exit
+     --version       output version information and exit
+     --cfg=file      alternate config file (not ../etc/acmefetch.cfg)
+     --staging       use the server specified in ACMEstaging
+     --checkonly     only check validity of existing certs
+     --force         will renew certs even when they are not expired
+     --verbose       talk more while working
+
+=head1 DESCRIPTION
+
+Use the services of Let's Encrypt to generate SSL certificates.
+Use the F<acmefetch.cfg> file to specify what should be done.
+
+=head1 APACHE NOTES
+
+The ACME protocol requires remote access files stored in your website to verify
+that you have control over the website. Since the website may have special ideas about
+how it wants to control file access. Some special F<.htaccess> rules may come in handy.
+
+=head2 Exclude from authentication
+
+ AuthType Basic
+ AuthName "Protect Everything"
+ AuthUserFile /home/demo/htpasswd
+ Require valid-user
+
+ SetEnvIf Request_URI ".well-known/acme-challenge" allow
+ Order allow,deny
+ Allow from env=allow
+ Satisfy any
+
+=head2 Skip Rewrite rules
+
+ RewriteEngine On
+ RewriteBase /
+
+ RewriteCond %{REQUEST_URI} !.well-known/acme-challenge
+ RewriteRule (.*)  http://localhost:23020/$1  [P]
+
+=head1 COPYRIGHT
+
+Copyright (c) 2016 by OETIKER+PARTNER AG. All rights reserved.
+
+=head1 LICENSE
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+
+=head1 AUTHOR
+
+S<Tobias Oetiker E<lt>tobi@oetiker.chE<gt>>
+
+=head1 HISTORY
+
+ 2016-01-20 to Initial Version
+
+=cut

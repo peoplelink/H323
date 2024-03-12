@@ -1,0 +1,49 @@
+2016-02-13 19:15:39 +0100   - config file fix -- Dominik Hassler
+2016-02-23 17:57:33 +0100   make configure more careful with checking the environment before getting perl to build things -- Tobias Oetiker
+2016-02-13 18:25:02 +0100  (tag: v0.4.0)  * --checkonly option added * make format for certs and keys configurable * updated to Protocol::ACME 0.11 * fix missing use FindBin -- Tobias Oetiker
+2016-02-12 19:47:07 +0100   - a couple of fixes -- Dominik Hassler
+2016-01-27 11:18:46 +0100   output the key to a temp file -- Tobias Oetiker
+2016-01-26 20:40:59 +0100  (tag: v0.3.4)  fix version string -- Tobias Oetiker
+2016-01-26 20:08:59 +0100   make bla work without quotes ... -- Tobias Oetiker
+2016-01-26 20:02:21 +0100  (tag: v0.3.3)  add some documentation -- Tobias Oetiker
+2016-01-26 16:39:24 +0100  (tag: v0.3.2)  better documentation -- Tobias Oetiker
+2016-01-26 16:31:51 +0100   added progress reporting -- Tobias Oetiker
+2016-01-25 18:11:03 +0100   maybe adding an explicity Math::BigInt dependency will unbreak Travis ? -- Tobias Oetiker
+2016-01-25 17:58:40 +0100  (tag: v0.3.1)  * make 'on demand' rebuild work * add ssl dependency -- Tobias Oetiker
+2016-01-25 11:27:46 +0100  (tag: v0.3.0)  fix sample config -- Tobias Oetiker
+2016-01-25 11:25:29 +0100   * only renew certificates that are expired OR do not contain all subject alternativ names * make this work with the 0.09 api -- Tobias Oetiker
+2016-01-25 08:21:38 +0100  (tag: v0.2.2)  release 0.2.2 -- Tobias Oetiker
+2016-01-25 08:19:23 +0100   add JSON::PP as a dependency, just to be sure it gets built (#6) -- Tobias Oetiker
+2016-01-20 11:21:06 +0100  (tag: v0.2.1)  re-realease for 0.09 -- Tobias Oetiker
+2016-01-19 09:26:56 +0100   added missing quotes -- Tobias Oetiker
+2016-01-19 09:25:57 +0100   spelling is important :-) -- Tobias Oetiker
+2016-01-19 09:25:09 +0100   not env, PERL -- Tobias Oetiker
+2016-01-19 09:24:14 +0100   still trying to get travis to check all perl version -- Tobias Oetiker
+2016-01-19 09:22:49 +0100   fix perlbrew call -- Tobias Oetiker
+2016-01-19 09:21:10 +0100   try directing perlbrew -- Tobias Oetiker
+2016-01-19 09:08:04 +0100   no cpan stuff -- Tobias Oetiker
+2016-01-19 09:04:11 +0100   can we build on different perls? -- Tobias Oetiker
+2016-01-19 09:00:13 +0100   even simpler test -- Tobias Oetiker
+2016-01-19 08:57:43 +0100   switch to c infrastructure -- Tobias Oetiker
+2016-01-19 08:56:43 +0100   fix syntax regression -- Tobias Oetiker
+2016-01-19 08:54:18 +0100   complete build cycle -- Tobias Oetiker
+2016-01-19 08:50:40 +0100   go travis -- Tobias Oetiker
+2016-01-19 08:46:30 +0100   lets have some testing -- Tobias Oetiker
+2016-01-19 08:39:54 +0100   remove Protocol::ACME dependencies ... -- Tobias Oetiker
+2016-01-18 21:23:50 +0100  (tag: v0.2.0)  release 0.2.0 -- Tobias Oetiker
+2016-01-18 21:21:34 +0100   some extra cleanup -- Tobias Oetiker
+2016-01-18 10:34:00 -0800   Adding staging option -- Stephen Ludin
+2016-01-18 21:08:17 +0100   do not specify unnecesasry attributes -- Tobias Oetiker
+2016-01-18 19:06:08 +0100   better docs -- Tobias Oetiker
+2016-01-18 19:00:17 +0100  (tag: v0.1.1)  v0.1.1 -- Tobias Oetiker
+2016-01-18 18:59:36 +0100   make it work for just one site -- Tobias Oetiker
+2016-01-18 09:33:51 -0800   Adding mkdir for $(libdir) in Makefile.am -- Stephen Ludin
+2016-01-18 18:53:12 +0100   irnore README -- Tobias Oetiker
+2016-01-18 18:52:48 +0100   fix readme -- Tobias Oetiker
+2016-01-18 17:45:08 +0100  (tag: v0.1.0)  ignore archives -- Tobias Oetiker
+2016-01-18 17:44:47 +0100   missing files added -- Tobias Oetiker
+2016-01-18 17:36:46 +0100   first certificate generated -- Tobias Oetiker
+2016-01-17 18:16:04 +0100   fix syntax -- Tobias Oetiker
+2016-01-17 18:15:05 +0100   install config file via make -- Tobias Oetiker
+2016-01-17 18:00:52 +0100   initial -- Tobias Oetiker
+2016-01-15 14:11:43 +0100   first commit -- Tobias Oetiker

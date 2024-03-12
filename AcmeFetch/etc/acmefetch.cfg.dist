@@ -1,0 +1,34 @@
+{
+    "GENERAL": {
+        "ACMEstaging": "acme-staging.api.letsencrypt.org",
+        "ACMEservice": "acme-v01.api.letsencrypt.org",
+        "accountKeyPath": "/etc/ssl/private/letsencryptAccountKey.key"
+    },
+    "CERTS": [
+        {
+            "certOutput": "/etc/ssl/certs/testCert.pem",
+            "certFormat": "PEM",
+            "keyOutput": "/etc/ssl/private/testCert.key",
+            "keyFormat": "PEM",
+            "chainOutput": "/etc/ssl/certs/testCertChain.pem",
+            "chainFormat": "PEM",
+            "commonName": "my.web.domain",
+            "SITES": {
+                "my.web.domain": {
+                    "challengeHandler": "SimpleSSH",
+                    "challengeConfig": {
+                        "www_root": "/home/myweb/public_html/",
+                        "ssh_host": "myweb@server"
+                    }
+                },
+                "your.web.domain": {
+                    "challengeHandler": "SimpleSSH",
+                    "challengeConfig": {
+                        "www_root": "/home/yourweb/public_html/",
+                        "ssh_host": "yourweb@server"
+                    }
+                }
+            }
+        }
+    ]
+}
